@@ -9,7 +9,7 @@ Two equivalent versions are included — `setup.sh` (bash) and `setup.py` (Pytho
 - A RunPod pod with ComfyUI already installed at `/workspace/runpod-slim/ComfyUI`, with a Python venv at `.venv-cu128/`
 - A Hugging Face token (see **Gated repos** below). Normally, set `HF_TOKEN` via a RunPod Secret referenced as `{{ RUNPOD_SECRET_yourSecretName }}` in the pod's Environment Variables. If `HF_TOKEN` is absent, the script securely prompts for it in the terminal and displays a `●` for each hidden character entered.
 - `wget`, `git`, `pip` available in the venv (standard on the `runpod-slim` image)
-- Optional automatic stop requires the pod-provided `RUNPOD_POD_ID` environment variable. The script uses `RUNPOD_API_KEY` or securely prompts for a RunPod API key with `●` masking, then verifies that the current pod belongs to the key's account through RunPod GraphQL before scheduling `podStop`.
+- Optional automatic termination requires the pod-provided `RUNPOD_POD_ID` environment variable. The script uses `RUNPOD_API_KEY` or securely prompts for a RunPod API key with `●` masking, lists the account's pods through RunPod's REST API to verify the current pod, then schedules pod termination.
 
 ## Usage
 
@@ -25,7 +25,7 @@ bash setup.sh [concurrency]      # or: python3 setup.py [concurrency]
 
 Before making any changes, the script validates the environment or manually entered token with Hugging Face. An invalid token or a verification/network failure stops setup immediately.
 
-The script also asks whether it should automatically stop the pod after two hours. Answering `yes` verifies that `runpodctl` can access the current pod, then starts a detached timer. This **stops** the pod and releases its GPU while preserving `/workspace`; it does not permanently terminate/delete the pod. The timer begins when you answer the prompt.
+The script also asks whether it should permanently terminate the pod after two hours. Answering `yes` verifies API access to the current pod, then starts a detached timer. Termination **deletes the pod and its container disk**, including `/workspace` unless that data is on a separately retained network volume. The timer begins when you answer the prompt.
 
 On success, the script ends by launching ComfyUI itself (`--listen 0.0.0.0 --port 8188 --enable-cors-header --enable-manager --use-sage-attention`) — no separate launch step needed. If any download fails, it prints a warning and exits without launching, so you never end up running against incomplete models without noticing.
 
@@ -41,7 +41,7 @@ cd /workspace/runpod-slim/ComfyUI
 ## What it does, in order
 
 1. Loads `HF_TOKEN` from the environment or securely prompts for it, then verifies it with Hugging Face. Setup stops if verification fails.
-2. Offers to schedule an automatic pod stop in two hours.
+2. Offers to schedule permanent pod termination in two hours.
 3. Prints a snapshot (running processes, port 8188 status, GPU, disk, custom node folder) — useful for spotting a stale process before touching anything.
 4. Kills anything already listening on port 8188.
 5. `git fetch` + `reset --hard origin/master` on the ComfyUI checkout.

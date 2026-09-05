@@ -55,11 +55,11 @@ if [ -z "$HF_NAME" ]; then
 fi
 echo "Hugging Face token verified for $HF_NAME."
 
-read -r -p "Automatically stop this RunPod after 2 hours? [y/N]: " AUTO_STOP
+read -r -p "Permanently terminate this RunPod after 2 hours? [y/N]: " AUTO_STOP
 case "$AUTO_STOP" in
     y|Y|yes|YES|Yes)
         if [ -z "${RUNPOD_POD_ID:-}" ]; then
-            echo "ERROR: RUNPOD_POD_ID is not set, so the automatic stop cannot be scheduled." >&2
+            echo "ERROR: RUNPOD_POD_ID is not set, so automatic termination cannot be scheduled." >&2
             exit 1
         fi
         RUNPOD_KEY="${RUNPOD_API_KEY:-}"
@@ -76,10 +76,10 @@ case "$AUTO_STOP" in
         RUNPOD_API_KEY="$RUNPOD_KEY" nohup python3 "$(dirname "$0")/setup.py" --auto-stop-worker "$RUNPOD_POD_ID" \
             >/tmp/comfy-runpod-auto-stop.log 2>&1 &
         unset RUNPOD_KEY
-        echo "Automatic stop scheduled for pod $RUNPOD_POD_ID in 2 hours."
+        echo "Permanent termination scheduled for pod $RUNPOD_POD_ID in 2 hours."
         ;;
     *)
-        echo "Automatic pod stop not scheduled."
+        echo "Automatic pod termination not scheduled."
         ;;
 esac
 
