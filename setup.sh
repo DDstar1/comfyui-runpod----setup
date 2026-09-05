@@ -41,8 +41,25 @@ case "$AUTO_STOP" in
             exit 1
         fi
         if ! timeout 20 runpodctl pod get "$RUNPOD_POD_ID" >/dev/null 2>&1; then
-            echo "ERROR: runpodctl could not access this pod. Check its API-key configuration." >&2
-            exit 1
+            RUNPOD_KEY="${RUNPOD_API_KEY:-}"
+            if [ -z "$RUNPOD_KEY" ]; then
+                read -r -s -p "runpodctl needs authentication. Paste your RunPod API key: " RUNPOD_KEY
+                echo
+            fi
+            if [ -z "$RUNPOD_KEY" ]; then
+                echo "ERROR: no RunPod API key was provided." >&2
+                exit 1
+            fi
+            if ! runpodctl config --apiKey "$RUNPOD_KEY" >/dev/null 2>&1; then
+                echo "ERROR: runpodctl could not save the RunPod API key." >&2
+                exit 1
+            fi
+            unset RUNPOD_KEY
+            if ! timeout 20 runpodctl pod get "$RUNPOD_POD_ID" >/dev/null 2>&1; then
+                echo "ERROR: the RunPod API key could not access this pod." >&2
+                exit 1
+            fi
+            echo "RunPod API key verified."
         fi
         nohup bash -c 'sleep 2h; exec runpodctl pod stop "$1"' auto-stop "$RUNPOD_POD_ID" \
             >/tmp/comfy-runpod-auto-stop.log 2>&1 &

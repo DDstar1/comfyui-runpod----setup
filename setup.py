@@ -101,19 +101,39 @@ def offer_pod_auto_stop():
         print("ERROR: runpodctl is not installed, so the automatic stop cannot be scheduled.", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        check = subprocess.run(
-            ["runpodctl", "pod", "get", pod_id],
+    def can_access_pod() -> bool:
+        try:
+            return subprocess.run(
+                ["runpodctl", "pod", "get", pod_id],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=20,
+            ).returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+
+    if not can_access_pod():
+        api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
+        if not api_key:
+            if not sys.stdin.isatty():
+                print("ERROR: runpodctl is not configured and no interactive terminal is available.", file=sys.stderr)
+                sys.exit(1)
+            api_key = getpass.getpass(
+                "runpodctl needs authentication. Paste your RunPod API key: "
+            ).strip()
+        if not api_key:
+            print("ERROR: no RunPod API key was provided.", file=sys.stderr)
+            sys.exit(1)
+
+        configured = subprocess.run(
+            ["runpodctl", "config", "--apiKey", api_key],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=20,
         )
-    except subprocess.TimeoutExpired:
-        print("ERROR: runpodctl timed out while checking access to this pod.", file=sys.stderr)
-        sys.exit(1)
-    if check.returncode != 0:
-        print("ERROR: runpodctl could not access this pod. Check its API-key configuration.", file=sys.stderr)
-        sys.exit(1)
+        if configured.returncode != 0 or not can_access_pod():
+            print("ERROR: the RunPod API key could not access this pod.", file=sys.stderr)
+            sys.exit(1)
+        print("RunPod API key verified.")
 
     subprocess.Popen(
         ["bash", "-c", 'sleep 2h; exec runpodctl pod stop "$1"', "auto-stop", pod_id],
