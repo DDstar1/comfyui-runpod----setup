@@ -7,7 +7,7 @@ Two equivalent versions are included — `setup.sh` (bash) and `setup.py` (Pytho
 ## Requirements
 
 - A RunPod pod with ComfyUI already installed at `/workspace/runpod-slim/ComfyUI`, with a Python venv at `.venv-cu128/`
-- An `HF_TOKEN` environment variable set on the pod, pointing at a Hugging Face token (see **Gated repos** below). On RunPod this is normally set via a pod Secret referenced as `{{ RUNPOD_SECRET_yourSecretName }}` in the pod's own Environment Variables section — RunPod resolves that into a real env var at container boot, before this script ever runs.
+- A Hugging Face token (see **Gated repos** below). Normally, set `HF_TOKEN` via a RunPod Secret referenced as `{{ RUNPOD_SECRET_yourSecretName }}` in the pod's Environment Variables. If `HF_TOKEN` is absent, the script securely prompts for it in the terminal (the input is hidden).
 - `wget`, `git`, `pip` available in the venv (standard on the `runpod-slim` image)
 
 ## Usage
@@ -22,6 +22,8 @@ bash setup.sh [concurrency]      # or: python3 setup.py [concurrency]
 
 `concurrency` is optional and defaults to **2** — the number of model downloads allowed to run at the same time. Hugging Face rate-limits (HTTP 429) bursts of parallel downloads from RunPod's shared datacenter IPs; 2 has proven reliable in testing. Raise it if you want to try faster, or drop to 1 if you still see 429s.
 
+Before making any changes, the script validates the environment or manually entered token with Hugging Face. An invalid token or a verification/network failure stops setup immediately.
+
 On success, the script ends by launching ComfyUI itself (`--listen 0.0.0.0 --port 8188 --enable-cors-header --enable-manager --use-sage-attention`) — no separate launch step needed. If any download fails, it prints a warning and exits without launching, so you never end up running against incomplete models without noticing.
 
 ### Relaunching without rerunning setup
@@ -35,13 +37,14 @@ cd /workspace/runpod-slim/ComfyUI
 
 ## What it does, in order
 
-1. Prints a snapshot (running processes, port 8188 status, GPU, disk, custom node folder) — useful for spotting a stale process before touching anything.
-2. Kills anything already listening on port 8188.
-3. `git fetch` + `reset --hard origin/master` on the ComfyUI checkout.
-4. Installs/upgrades `requirements.txt`, `comfy-kitchen`, `comfyui-manager`, and `sageattention`.
-5. Clones [`tritant/ComfyUI_MiniMax_H3_Extender`](https://github.com/tritant/ComfyUI_MiniMax_H3_Extender) into `custom_nodes/` if not already present, and installs its requirements.
-6. Downloads all models + the Turbo LoRA in parallel (see **Models downloaded** below), with retry/backoff tuned for Hugging Face's rate limiting (`--retry-on-http-error=429,...`, staggered via a concurrency-limited pool, resumable with `-c` if interrupted).
-7. Launches ComfyUI.
+1. Loads `HF_TOKEN` from the environment or securely prompts for it, then verifies it with Hugging Face. Setup stops if verification fails.
+2. Prints a snapshot (running processes, port 8188 status, GPU, disk, custom node folder) — useful for spotting a stale process before touching anything.
+3. Kills anything already listening on port 8188.
+4. `git fetch` + `reset --hard origin/master` on the ComfyUI checkout.
+5. Installs/upgrades `requirements.txt`, `comfy-kitchen`, `comfyui-manager`, and `sageattention`.
+6. Clones [`tritant/ComfyUI_MiniMax_H3_Extender`](https://github.com/tritant/ComfyUI_MiniMax_H3_Extender) into `custom_nodes/` if not already present, and installs its requirements.
+7. Downloads all models + the Turbo LoRA in parallel (see **Models downloaded** below), with retry/backoff tuned for Hugging Face's rate limiting (`--retry-on-http-error=429,...`, staggered via a concurrency-limited pool, resumable with `-c` if interrupted).
+8. Launches ComfyUI.
 
 ## Models downloaded
 

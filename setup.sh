@@ -1,5 +1,34 @@
 #!/bin/bash
 set -e
+
+if [ -n "${HF_TOKEN:-}" ]; then
+    echo "Found HF_TOKEN in the environment; verifying it with Hugging Face..."
+else
+    if [ ! -t 0 ]; then
+        echo "ERROR: HF_TOKEN is not set and no interactive terminal is available." >&2
+        exit 1
+    fi
+    read -r -s -p "HF_TOKEN is not set. Paste your Hugging Face token: " HF_TOKEN
+    echo
+    export HF_TOKEN
+fi
+
+if [ -z "$HF_TOKEN" ]; then
+    echo "ERROR: no Hugging Face token was provided." >&2
+    exit 1
+fi
+
+HF_ACCOUNT=$(wget -qO- --timeout=20 --header="Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami-v2) || {
+    echo "ERROR: Hugging Face rejected the token or token verification could not connect." >&2
+    exit 1
+}
+HF_NAME=$(printf '%s' "$HF_ACCOUNT" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+if [ -z "$HF_NAME" ]; then
+    echo "ERROR: Hugging Face returned an unexpected response while verifying the token." >&2
+    exit 1
+fi
+echo "Hugging Face token verified for $HF_NAME."
+
 cd /workspace/runpod-slim/ComfyUI
 
 echo "===== SNAPSHOT BEFORE ANYTHING RUNS ====="  # catches a stale process before touching anything else

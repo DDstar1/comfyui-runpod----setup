@@ -6,6 +6,10 @@ import os
 import re
 import subprocess
 import sys
+import getpass
+import json
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -13,7 +17,7 @@ COMFYUI_DIR = Path("/workspace/runpod-slim/ComfyUI")
 VENV_PY = COMFYUI_DIR / ".venv-cu128" / "bin" / "python"
 VENV_PIP = COMFYUI_DIR / ".venv-cu128" / "bin" / "pip"
 BASE = COMFYUI_DIR / "models"
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+HF_TOKEN = ""
 
 WGET_RETRY = [
     "--tries=20", "--waitretry=45", "--random-wait",
@@ -39,8 +43,47 @@ GATED_REPOS_NOTE = (
 
 
 def run(cmd, **kwargs):
-    print(f"+ {' '.join(str(c) for c in cmd)}")
+    display_cmd = [
+        "Authorization: Bearer ***" if str(c).startswith("Authorization: Bearer ") else str(c)
+        for c in cmd
+    ]
+    print(f"+ {' '.join(display_cmd)}")
     return subprocess.run(cmd, **kwargs)
+
+
+def get_and_validate_hf_token() -> str:
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if token:
+        print("Found HF_TOKEN in the environment; verifying it with Hugging Face...")
+    else:
+        if not sys.stdin.isatty():
+            print("ERROR: HF_TOKEN is not set and no interactive terminal is available.", file=sys.stderr)
+            sys.exit(1)
+        token = getpass.getpass("HF_TOKEN is not set. Paste your Hugging Face token: ").strip()
+
+    if not token:
+        print("ERROR: no Hugging Face token was provided.", file=sys.stderr)
+        sys.exit(1)
+
+    request = urllib.request.Request(
+        "https://huggingface.co/api/whoami-v2",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            account = json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            print("ERROR: Hugging Face rejected the token. Check that it is valid and try again.", file=sys.stderr)
+        else:
+            print(f"ERROR: Hugging Face token verification failed (HTTP {exc.code}).", file=sys.stderr)
+        sys.exit(1)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not verify the Hugging Face token: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Hugging Face token verified for {account.get('name', 'the authenticated account')}.")
+    return token
 
 
 def snapshot():
@@ -142,6 +185,9 @@ def launch_comfyui():
 
 
 def main():
+    global HF_TOKEN
+    HF_TOKEN = get_and_validate_hf_token()
+
     if len(sys.argv) > 1 and re.fullmatch(r"\d+", sys.argv[1]):
         concurrency = int(sys.argv[1])  # optional 1st arg overrides the prompt, e.g. `python3 setup.py 3`
     else:
