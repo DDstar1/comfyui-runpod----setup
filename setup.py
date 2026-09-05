@@ -53,6 +53,44 @@ def run(cmd, **kwargs):
     return subprocess.run(cmd, **kwargs)
 
 
+def masked_input(prompt: str) -> str:
+    """Read a secret from a Unix terminal while showing one dot per character."""
+    if not sys.stdin.isatty():
+        return getpass.getpass(prompt)
+
+    import termios
+    import tty
+
+    secret = []
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    try:
+        tty.setraw(fd)
+        while True:
+            char = sys.stdin.read(1)
+            if char in ("\r", "\n"):
+                break
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char in ("\x08", "\x7f"):
+                if secret:
+                    secret.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+            if char.isprintable():
+                secret.append(char)
+                sys.stdout.write("●")
+                sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    return "".join(secret)
+
+
 def get_and_validate_hf_token() -> str:
     token = os.environ.get("HF_TOKEN", "").strip()
     if token:
@@ -61,7 +99,7 @@ def get_and_validate_hf_token() -> str:
         if not sys.stdin.isatty():
             print("ERROR: HF_TOKEN is not set and no interactive terminal is available.", file=sys.stderr)
             sys.exit(1)
-        token = getpass.getpass("HF_TOKEN is not set. Paste your Hugging Face token: ").strip()
+        token = masked_input("HF_TOKEN is not set. Paste your Hugging Face token: ").strip()
 
     if not token:
         print("ERROR: no Hugging Face token was provided.", file=sys.stderr)
@@ -103,7 +141,7 @@ def offer_pod_auto_stop():
         if not sys.stdin.isatty():
             print("ERROR: RUNPOD_API_KEY is not set and no interactive terminal is available.", file=sys.stderr)
             sys.exit(1)
-        api_key = getpass.getpass("Paste your RunPod API key: ").strip()
+        api_key = masked_input("Paste your RunPod API key: ").strip()
     if not api_key:
         print("ERROR: no RunPod API key was provided.", file=sys.stderr)
         sys.exit(1)

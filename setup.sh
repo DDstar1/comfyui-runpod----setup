@@ -1,6 +1,33 @@
 #!/bin/bash
 set -e
 
+masked_read() {
+    local variable_name="$1"
+    local prompt="$2"
+    local value=""
+    local char
+    printf '%s' "$prompt"
+    while IFS= read -r -s -n1 char; do
+        if [ -z "$char" ]; then
+            break
+        fi
+        case "$char" in
+            $'\177'|$'\b')
+                if [ -n "$value" ]; then
+                    value="${value%?}"
+                    printf '\b \b'
+                fi
+                ;;
+            *)
+                value+="$char"
+                printf '●'
+                ;;
+        esac
+    done
+    printf '\n'
+    printf -v "$variable_name" '%s' "$value"
+}
+
 if [ -n "${HF_TOKEN:-}" ]; then
     echo "Found HF_TOKEN in the environment; verifying it with Hugging Face..."
 else
@@ -8,8 +35,7 @@ else
         echo "ERROR: HF_TOKEN is not set and no interactive terminal is available." >&2
         exit 1
     fi
-    read -r -s -p "HF_TOKEN is not set. Paste your Hugging Face token: " HF_TOKEN
-    echo
+    masked_read HF_TOKEN "HF_TOKEN is not set. Paste your Hugging Face token: "
     export HF_TOKEN
 fi
 
@@ -38,8 +64,7 @@ case "$AUTO_STOP" in
         fi
         RUNPOD_KEY="${RUNPOD_API_KEY:-}"
         if [ -z "$RUNPOD_KEY" ]; then
-            read -r -s -p "Paste your RunPod API key: " RUNPOD_KEY
-            echo
+            masked_read RUNPOD_KEY "Paste your RunPod API key: "
         fi
         if [ -z "$RUNPOD_KEY" ]; then
             echo "ERROR: no RunPod API key was provided." >&2
