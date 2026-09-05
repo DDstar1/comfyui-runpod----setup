@@ -23,6 +23,53 @@ VENV_PIP = COMFYUI_DIR / ".venv-cu128" / "bin" / "pip"
 BASE = COMFYUI_DIR / "models"
 HF_TOKEN = ""
 
+TMUX_SESSION = "comfy-setup"
+
+
+def timestamp():
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def stage(name: str):
+    print(f"\n{'=' * 72}", flush=True)
+    print(f"[{timestamp()}] {name}", flush=True)
+    print(f"{'=' * 72}", flush=True)
+
+
+def ensure_tmux():
+    """
+    Make tmux the first real setup operation.
+
+    The outer process creates the persistent session and immediately attaches
+    to it. The inner process sees TMUX and continues normally. If the session
+    already exists, attach to it rather than creating a second setup process.
+    """
+    if os.environ.get("TMUX"):
+        return
+
+    script = str(Path(__file__).resolve())
+    args = [sys.executable, script, *sys.argv[1:]]
+
+    existing = subprocess.run(
+        ["tmux", "has-session", "-t", TMUX_SESSION],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    if existing.returncode == 0:
+        print(f"[{timestamp()}] tmux session '{TMUX_SESSION}' already exists.")
+        print("Attaching to existing setup session...", flush=True)
+        os.execvp("tmux", ["tmux", "attach-session", "-t", TMUX_SESSION])
+
+    print(f"[{timestamp()}] Creating persistent tmux session '{TMUX_SESSION}'...", flush=True)
+
+    subprocess.run(
+        ["tmux", "new-session", "-d", "-s", TMUX_SESSION, *args],
+        check=True,
+    )
+
+    os.execvp("tmux", ["tmux", "attach-session", "-t", TMUX_SESSION])
+
 WGET_RETRY = [
     "--tries=20", "--waitretry=45", "--random-wait",
     "--retry-on-http-error=429,500,502,503,504",  # --tries alone does NOT retry HTTP 4xx by default
@@ -51,7 +98,7 @@ def run(cmd, **kwargs):
         "Authorization: Bearer ***" if str(c).startswith("Authorization: Bearer ") else str(c)
         for c in cmd
     ]
-    print(f"+ {' '.join(display_cmd)}")
+    print(f"[{timestamp()}] + {' '.join(display_cmd)}", flush=True)
     return subprocess.run(cmd, **kwargs)
 
 
@@ -318,10 +365,37 @@ def update_comfyui():
 
 
 def install_deps():
-    run([str(VENV_PIP), "install", "-r", str(COMFYUI_DIR / "requirements.txt"), "-q"], check=True)
-    run([str(VENV_PIP), "install", "-U", "comfy-kitchen", "-q"], check=True)
-    run([str(VENV_PIP), "install", "-U", "--pre", "comfyui-manager", "-q"], check=True)
-    run([str(VENV_PIP), "install", "sageattention", "-q"], check=True)  # required for --use-sage-attention
+    stage("Installing ComfyUI Python requirements")
+    run([
+        str(VENV_PIP),
+        "install",
+        "-r",
+        str(COMFYUI_DIR / "requirements.txt"),
+    ], check=True)
+
+    stage("Installing comfy-kitchen")
+    run([
+        str(VENV_PIP),
+        "install",
+        "-U",
+        "comfy-kitchen",
+    ], check=True)
+
+    stage("Installing ComfyUI Manager")
+    run([
+        str(VENV_PIP),
+        "install",
+        "-U",
+        "--pre",
+        "comfyui-manager",
+    ], check=True)
+
+    stage("Installing SageAttention")
+    run([
+        str(VENV_PIP),
+        "install",
+        "sageattention",
+    ], check=True)  # required for --use-sage-attention
 
 
 def install_custom_nodes():
@@ -341,7 +415,12 @@ def download_one(url: str, dest_subdir: str) -> bool:
     dest.mkdir(parents=True, exist_ok=True)
     cmd = ["wget", "-c", *WGET_RETRY, "--show-progress",
            "--header", f"Authorization: Bearer {HF_TOKEN}", "-P", str(dest), url]
+    print(f"[{timestamp()}] Starting download: {url}", flush=True)
     result = run(cmd)
+    if result.returncode == 0:
+        print(f"[{timestamp()}] Download completed: {url}", flush=True)
+    else:
+        print(f"[{timestamp()}] Download FAILED: {url}", flush=True)
     return result.returncode == 0
 
 
@@ -357,7 +436,11 @@ def download_models(concurrency: int) -> bool:
 
 
 def launch_comfyui():
-    print("=== SETUP.PY DONE - models + custom nodes + lora ready. Launching ComfyUI now (Step C). ===")
+    print(
+        f"[{timestamp()}] === SETUP.PY DONE - models + custom nodes + lora ready. "
+        "Launching ComfyUI now (Step C). ===",
+        flush=True,
+    )
     os.chdir(COMFYUI_DIR)
     os.execv(str(VENV_PY), [
         str(VENV_PY), "main.py",
@@ -367,35 +450,69 @@ def launch_comfyui():
 
 
 def main():
+    # IMPORTANT: this must happen before all normal setup work.
+    # Worker modes must bypass tmux because they are deliberately detached.
     if len(sys.argv) == 3 and sys.argv[1] == "--auto-stop-worker":
         sys.exit(auto_stop_worker(sys.argv[2]))
     if len(sys.argv) == 3 and sys.argv[1] == "--auto-stop-worker-check":
         sys.exit(auto_stop_worker_check(sys.argv[2]))
 
+    ensure_tmux()
+
+    stage("ComfyUI RunPod setup started")
+
     global HF_TOKEN
+    stage("Hugging Face authentication")
     HF_TOKEN = get_and_validate_hf_token()
+
+    stage("RunPod auto-stop configuration")
     offer_pod_auto_stop()
 
     if len(sys.argv) > 1 and re.fullmatch(r"\d+", sys.argv[1]):
-        concurrency = int(sys.argv[1])  # optional 1st arg overrides the prompt, e.g. `python3 setup.py 3`
+        concurrency = int(sys.argv[1])
+        print(f"[{timestamp()}] Model download concurrency: {concurrency}", flush=True)
     else:
-        answer = input("How many downloads at a time? (HF rate-limits bigger bursts - default 2): ").strip()
+        answer = input(
+            "How many downloads at a time? "
+            "(HF rate-limits bigger bursts - default 2): "
+        ).strip()
         concurrency = int(answer) if re.fullmatch(r"\d+", answer) else 2
+        print(f"[{timestamp()}] Model download concurrency: {concurrency}", flush=True)
 
     os.chdir(COMFYUI_DIR)
+
+    stage("System snapshot")
     snapshot()
+
+    stage("Cleaning stale ComfyUI processes")
     kill_stale()
+
+    stage("Updating ComfyUI")
     update_comfyui()
+
     install_deps()
+
+    stage("Installing custom nodes")
     install_custom_nodes()
 
+    stage(f"Downloading models with concurrency={concurrency}")
     failed = download_models(concurrency)
+
     if failed:
-        print("WARNING: at least one download above failed (often a 403 on the gated FLUX.2 repos)")
-        print(GATED_REPOS_NOTE)
-        print("=== SETUP.PY DONE WITH ERRORS - not auto-launching ComfyUI, fix the download above first, then run setup.py again ===")
+        print(
+            "WARNING: at least one download above failed "
+            "(often a 403 on the gated FLUX.2 repos)",
+            flush=True,
+        )
+        print(GATED_REPOS_NOTE, flush=True)
+        print(
+            "=== SETUP.PY DONE WITH ERRORS - not auto-launching ComfyUI, "
+            "fix the download above first, then run setup.py again ===",
+            flush=True,
+        )
         sys.exit(1)
 
+    stage("Launching ComfyUI inside tmux")
     launch_comfyui()
 
 
