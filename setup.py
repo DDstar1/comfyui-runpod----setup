@@ -8,8 +8,9 @@ import subprocess
 import sys
 import getpass
 import json
-import shutil
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -97,51 +98,87 @@ def offer_pod_auto_stop():
     if not pod_id:
         print("ERROR: RUNPOD_POD_ID is not set, so the automatic stop cannot be scheduled.", file=sys.stderr)
         sys.exit(1)
-    if not shutil.which("runpodctl"):
-        print("ERROR: runpodctl is not installed, so the automatic stop cannot be scheduled.", file=sys.stderr)
+    api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
+    if not api_key:
+        if not sys.stdin.isatty():
+            print("ERROR: RUNPOD_API_KEY is not set and no interactive terminal is available.", file=sys.stderr)
+            sys.exit(1)
+        api_key = getpass.getpass("Paste your RunPod API key: ").strip()
+    if not api_key:
+        print("ERROR: no RunPod API key was provided.", file=sys.stderr)
         sys.exit(1)
 
-    def can_access_pod() -> bool:
-        try:
-            return subprocess.run(
-                ["runpodctl", "pod", "get", pod_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=20,
-            ).returncode == 0
-        except subprocess.TimeoutExpired:
-            return False
+    try:
+        runpod_api_request(pod_id, api_key, method="GET")
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print("RunPod API key and pod access verified.")
 
-    if not can_access_pod():
-        api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
-        if not api_key:
-            if not sys.stdin.isatty():
-                print("ERROR: runpodctl is not configured and no interactive terminal is available.", file=sys.stderr)
-                sys.exit(1)
-            api_key = getpass.getpass(
-                "runpodctl needs authentication. Paste your RunPod API key: "
-            ).strip()
-        if not api_key:
-            print("ERROR: no RunPod API key was provided.", file=sys.stderr)
-            sys.exit(1)
-
-        configured = subprocess.run(
-            ["runpodctl", "config", "--apiKey", api_key],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+    worker_env = os.environ.copy()
+    worker_env["RUNPOD_API_KEY"] = api_key
+    log = open("/tmp/comfy-runpod-auto-stop.log", "a", encoding="utf-8")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--auto-stop-worker", pod_id],
+            start_new_session=True,
+            stdout=log,
+            stderr=log,
+            env=worker_env,
         )
-        if configured.returncode != 0 or not can_access_pod():
-            print("ERROR: the RunPod API key could not access this pod.", file=sys.stderr)
-            sys.exit(1)
-        print("RunPod API key verified.")
-
-    subprocess.Popen(
-        ["bash", "-c", 'sleep 2h; exec runpodctl pod stop "$1"', "auto-stop", pod_id],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    finally:
+        log.close()
     print(f"Automatic stop scheduled for pod {pod_id} in 2 hours.")
+
+
+def runpod_api_request(pod_id: str, api_key: str, method: str):
+    safe_pod_id = urllib.parse.quote(pod_id, safe="")
+    suffix = "/stop" if method == "POST" else ""
+    request = urllib.request.Request(
+        f"https://rest.runpod.io/v1/pods/{safe_pod_id}{suffix}",
+        method=method,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            raise RuntimeError("RunPod rejected the API key or it lacks pod permissions.") from exc
+        if exc.code == 404:
+            raise RuntimeError(f"RunPod could not find pod {pod_id} for this account.") from exc
+        raise RuntimeError(f"RunPod API request failed (HTTP {exc.code}).") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"could not connect to the RunPod API: {exc}") from exc
+
+
+def auto_stop_worker(pod_id: str):
+    api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
+    if not api_key:
+        print("Automatic stop failed: RUNPOD_API_KEY is missing.", file=sys.stderr)
+        return 1
+    time.sleep(2 * 60 * 60)
+    try:
+        runpod_api_request(pod_id, api_key, method="POST")
+    except RuntimeError as exc:
+        print(f"Automatic stop failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"Automatic stop requested successfully for pod {pod_id}.")
+    return 0
+
+
+def auto_stop_worker_check(pod_id: str):
+    api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
+    if not api_key:
+        print("ERROR: RUNPOD_API_KEY is missing.", file=sys.stderr)
+        return 1
+    try:
+        runpod_api_request(pod_id, api_key, method="GET")
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print("RunPod API key and pod access verified.")
+    return 0
 
 
 def snapshot():
@@ -243,6 +280,11 @@ def launch_comfyui():
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--auto-stop-worker":
+        sys.exit(auto_stop_worker(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] == "--auto-stop-worker-check":
+        sys.exit(auto_stop_worker_check(sys.argv[2]))
+
     global HF_TOKEN
     HF_TOKEN = get_and_validate_hf_token()
     offer_pod_auto_stop()

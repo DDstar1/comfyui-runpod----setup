@@ -36,33 +36,21 @@ case "$AUTO_STOP" in
             echo "ERROR: RUNPOD_POD_ID is not set, so the automatic stop cannot be scheduled." >&2
             exit 1
         fi
-        if ! command -v runpodctl >/dev/null 2>&1; then
-            echo "ERROR: runpodctl is not installed, so the automatic stop cannot be scheduled." >&2
+        RUNPOD_KEY="${RUNPOD_API_KEY:-}"
+        if [ -z "$RUNPOD_KEY" ]; then
+            read -r -s -p "Paste your RunPod API key: " RUNPOD_KEY
+            echo
+        fi
+        if [ -z "$RUNPOD_KEY" ]; then
+            echo "ERROR: no RunPod API key was provided." >&2
             exit 1
         fi
-        if ! timeout 20 runpodctl pod get "$RUNPOD_POD_ID" >/dev/null 2>&1; then
-            RUNPOD_KEY="${RUNPOD_API_KEY:-}"
-            if [ -z "$RUNPOD_KEY" ]; then
-                read -r -s -p "runpodctl needs authentication. Paste your RunPod API key: " RUNPOD_KEY
-                echo
-            fi
-            if [ -z "$RUNPOD_KEY" ]; then
-                echo "ERROR: no RunPod API key was provided." >&2
-                exit 1
-            fi
-            if ! runpodctl config --apiKey "$RUNPOD_KEY" >/dev/null 2>&1; then
-                echo "ERROR: runpodctl could not save the RunPod API key." >&2
-                exit 1
-            fi
-            unset RUNPOD_KEY
-            if ! timeout 20 runpodctl pod get "$RUNPOD_POD_ID" >/dev/null 2>&1; then
-                echo "ERROR: the RunPod API key could not access this pod." >&2
-                exit 1
-            fi
-            echo "RunPod API key verified."
+        if ! RUNPOD_API_KEY="$RUNPOD_KEY" python3 "$(dirname "$0")/setup.py" --auto-stop-worker-check "$RUNPOD_POD_ID"; then
+            exit 1
         fi
-        nohup bash -c 'sleep 2h; exec runpodctl pod stop "$1"' auto-stop "$RUNPOD_POD_ID" \
+        RUNPOD_API_KEY="$RUNPOD_KEY" nohup python3 "$(dirname "$0")/setup.py" --auto-stop-worker "$RUNPOD_POD_ID" \
             >/tmp/comfy-runpod-auto-stop.log 2>&1 &
+        unset RUNPOD_KEY
         echo "Automatic stop scheduled for pod $RUNPOD_POD_ID in 2 hours."
         ;;
     *)

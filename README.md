@@ -9,7 +9,7 @@ Two equivalent versions are included — `setup.sh` (bash) and `setup.py` (Pytho
 - A RunPod pod with ComfyUI already installed at `/workspace/runpod-slim/ComfyUI`, with a Python venv at `.venv-cu128/`
 - A Hugging Face token (see **Gated repos** below). Normally, set `HF_TOKEN` via a RunPod Secret referenced as `{{ RUNPOD_SECRET_yourSecretName }}` in the pod's Environment Variables. If `HF_TOKEN` is absent, the script securely prompts for it in the terminal (the input is hidden).
 - `wget`, `git`, `pip` available in the venv (standard on the `runpod-slim` image)
-- Optional automatic stop requires `runpodctl` and the pod-provided `RUNPOD_POD_ID` environment variable. If `runpodctl` is not already authenticated, the script uses `RUNPOD_API_KEY` or securely prompts for a RunPod API key and verifies it before scheduling the stop.
+- Optional automatic stop requires the pod-provided `RUNPOD_POD_ID` environment variable. The script uses `RUNPOD_API_KEY` or securely prompts for a RunPod API key, then verifies it directly with RunPod's API before scheduling the stop.
 
 ## Usage
 
