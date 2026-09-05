@@ -134,23 +134,29 @@ def offer_pod_auto_stop():
 
     pod_id = os.environ.get("RUNPOD_POD_ID", "").strip()
     if not pod_id:
-        print("ERROR: RUNPOD_POD_ID is not set, so automatic termination cannot be scheduled.", file=sys.stderr)
-        sys.exit(1)
+        print("WARNING: RUNPOD_POD_ID is not set; skipping automatic termination.", file=sys.stderr)
+        return
     api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
-    if not api_key:
-        if not sys.stdin.isatty():
-            print("ERROR: RUNPOD_API_KEY is not set and no interactive terminal is available.", file=sys.stderr)
-            sys.exit(1)
-        api_key = masked_input("Paste your RunPod API key: ").strip()
-    if not api_key:
-        print("ERROR: no RunPod API key was provided.", file=sys.stderr)
-        sys.exit(1)
+    while True:
+        if api_key:
+            try:
+                runpod_pod_request(pod_id, api_key, action="verify")
+                break
+            except RuntimeError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
 
-    try:
-        runpod_pod_request(pod_id, api_key, action="verify")
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
+        if not sys.stdin.isatty():
+            print("WARNING: cannot request another API key without an interactive terminal; skipping automatic termination.", file=sys.stderr)
+            return
+
+        choice = input("Press Enter to provide another RunPod API key, or type 'skip' to continue without termination: ").strip().lower()
+        if choice in ("s", "skip"):
+            print("Automatic pod termination skipped; continuing setup.")
+            return
+        api_key = masked_input("Paste your RunPod API key: ").strip()
+        if not api_key:
+            print("No API key entered; try again or choose 'skip'.", file=sys.stderr)
+
     print("RunPod API key and pod access verified.")
 
     worker_env = os.environ.copy()

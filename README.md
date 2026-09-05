@@ -25,7 +25,7 @@ bash setup.sh [concurrency]      # or: python3 setup.py [concurrency]
 
 Before making any changes, the script validates the environment or manually entered token with Hugging Face. An invalid token or a verification/network failure stops setup immediately.
 
-The script also asks whether it should permanently terminate the pod after two hours. Answering `yes` verifies API access to the current pod, then starts a detached timer. Termination **deletes the pod and its container disk**, including `/workspace` unless that data is on a separately retained network volume. The timer begins when you answer the prompt.
+The script also asks whether it should permanently terminate the pod after two hours. Answering `yes` verifies API access to the current pod, then starts a detached timer. If an environment-provided or entered API key fails, the script keeps offering another attempt until you explicitly skip termination and continue setup. Termination **deletes the pod and its container disk**, including `/workspace` unless that data is on a separately retained network volume. The timer begins when you answer the prompt.
 
 On success, the script ends by launching ComfyUI itself (`--listen 0.0.0.0 --port 8188 --enable-cors-header --enable-manager --use-sage-attention`) — no separate launch step needed. If any download fails, it prints a warning and exits without launching, so you never end up running against incomplete models without noticing.
 

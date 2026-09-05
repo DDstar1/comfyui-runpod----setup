@@ -59,24 +59,34 @@ read -r -p "Permanently terminate this RunPod after 2 hours? [y/N]: " AUTO_STOP
 case "$AUTO_STOP" in
     y|Y|yes|YES|Yes)
         if [ -z "${RUNPOD_POD_ID:-}" ]; then
-            echo "ERROR: RUNPOD_POD_ID is not set, so automatic termination cannot be scheduled." >&2
-            exit 1
+            echo "WARNING: RUNPOD_POD_ID is not set; skipping automatic termination." >&2
+            AUTO_STOP_SKIPPED=1
         fi
         RUNPOD_KEY="${RUNPOD_API_KEY:-}"
-        if [ -z "$RUNPOD_KEY" ]; then
-            masked_read RUNPOD_KEY "Paste your RunPod API key: "
+        while [ -z "${AUTO_STOP_SKIPPED:-}" ]; do
+            if [ -n "$RUNPOD_KEY" ] && RUNPOD_API_KEY="$RUNPOD_KEY" python3 "$(dirname "$0")/setup.py" --auto-stop-worker-check "$RUNPOD_POD_ID"; then
+                break
+            fi
+            read -r -p "Press Enter to provide another RunPod API key, or type 'skip' to continue without termination: " RETRY_TERMINATION
+            case "$RETRY_TERMINATION" in
+                s|S|skip|SKIP|Skip)
+                    AUTO_STOP_SKIPPED=1
+                    echo "Automatic pod termination skipped; continuing setup."
+                    ;;
+                *)
+                    masked_read RUNPOD_KEY "Paste your RunPod API key: "
+                    if [ -z "$RUNPOD_KEY" ]; then
+                        echo "No API key entered; try again or choose 'skip'." >&2
+                    fi
+                    ;;
+            esac
+        done
+        if [ -z "${AUTO_STOP_SKIPPED:-}" ]; then
+            RUNPOD_API_KEY="$RUNPOD_KEY" nohup python3 "$(dirname "$0")/setup.py" --auto-stop-worker "$RUNPOD_POD_ID" \
+                >/tmp/comfy-runpod-auto-stop.log 2>&1 &
+            echo "Permanent termination scheduled for pod $RUNPOD_POD_ID in 2 hours."
         fi
-        if [ -z "$RUNPOD_KEY" ]; then
-            echo "ERROR: no RunPod API key was provided." >&2
-            exit 1
-        fi
-        if ! RUNPOD_API_KEY="$RUNPOD_KEY" python3 "$(dirname "$0")/setup.py" --auto-stop-worker-check "$RUNPOD_POD_ID"; then
-            exit 1
-        fi
-        RUNPOD_API_KEY="$RUNPOD_KEY" nohup python3 "$(dirname "$0")/setup.py" --auto-stop-worker "$RUNPOD_POD_ID" \
-            >/tmp/comfy-runpod-auto-stop.log 2>&1 &
-        unset RUNPOD_KEY
-        echo "Permanent termination scheduled for pod $RUNPOD_POD_ID in 2 hours."
+        unset RUNPOD_KEY AUTO_STOP_SKIPPED RETRY_TERMINATION
         ;;
     *)
         echo "Automatic pod termination not scheduled."
