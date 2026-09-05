@@ -147,7 +147,7 @@ def offer_pod_auto_stop():
         sys.exit(1)
 
     try:
-        runpod_api_request(pod_id, api_key, method="GET")
+        runpod_graphql_request(pod_id, api_key, action="verify")
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -169,25 +169,50 @@ def offer_pod_auto_stop():
     print(f"Automatic stop scheduled for pod {pod_id} in 2 hours.")
 
 
-def runpod_api_request(pod_id: str, api_key: str, method: str):
-    safe_pod_id = urllib.parse.quote(pod_id, safe="")
-    suffix = "/stop" if method == "POST" else ""
+def runpod_graphql_request(pod_id: str, api_key: str, action: str):
+    if action == "verify":
+        query = "query AutoStopPods { myself { pods { id } } }"
+    elif action == "stop":
+        pod_literal = json.dumps(pod_id)
+        query = (
+            "mutation AutoStopPod { "
+            f"podStop(input: {{podId: {pod_literal}}}) {{ id desiredStatus }} "
+            "}"
+        )
+    else:
+        raise ValueError(f"unknown RunPod GraphQL action: {action}")
+
+    url = "https://api.runpod.io/graphql?api_key=" + urllib.parse.quote(api_key, safe="")
     request = urllib.request.Request(
-        f"https://rest.runpod.io/v1/pods/{safe_pod_id}{suffix}",
-        method=method,
-        headers={"Authorization": f"Bearer {api_key}"},
+        url,
+        data=json.dumps({"query": query}).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status
+            payload = json.load(response)
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
             raise RuntimeError("RunPod rejected the API key or it lacks pod permissions.") from exc
-        if exc.code == 404:
-            raise RuntimeError(f"RunPod could not find pod {pod_id} for this account.") from exc
-        raise RuntimeError(f"RunPod API request failed (HTTP {exc.code}).") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"RunPod GraphQL request failed (HTTP {exc.code}).") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not connect to the RunPod API: {exc}") from exc
+
+    if payload.get("errors"):
+        message = payload["errors"][0].get("message", "unknown GraphQL error")
+        raise RuntimeError(f"RunPod GraphQL error: {message}")
+
+    if action == "verify":
+        data = payload.get("data") or {}
+        myself = data.get("myself") or {}
+        pods = myself.get("pods") or []
+        if not any(pod.get("id") == pod_id for pod in pods):
+            raise RuntimeError(f"RunPod could not find pod {pod_id} under this API-key account.")
+    elif not ((payload.get("data") or {}).get("podStop") or {}).get("id"):
+        raise RuntimeError("RunPod did not confirm the pod stop request.")
+
+    return payload
 
 
 def auto_stop_worker(pod_id: str):
@@ -197,7 +222,7 @@ def auto_stop_worker(pod_id: str):
         return 1
     time.sleep(2 * 60 * 60)
     try:
-        runpod_api_request(pod_id, api_key, method="POST")
+        runpod_graphql_request(pod_id, api_key, action="stop")
     except RuntimeError as exc:
         print(f"Automatic stop failed: {exc}", file=sys.stderr)
         return 1
@@ -211,7 +236,7 @@ def auto_stop_worker_check(pod_id: str):
         print("ERROR: RUNPOD_API_KEY is missing.", file=sys.stderr)
         return 1
     try:
-        runpod_api_request(pod_id, api_key, method="GET")
+        runpod_graphql_request(pod_id, api_key, action="verify")
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
