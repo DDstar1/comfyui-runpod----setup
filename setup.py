@@ -8,6 +8,7 @@ import subprocess
 import sys
 import getpass
 import json
+import shutil
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -84,6 +85,43 @@ def get_and_validate_hf_token() -> str:
 
     print(f"Hugging Face token verified for {account.get('name', 'the authenticated account')}.")
     return token
+
+
+def offer_pod_auto_stop():
+    answer = input("Automatically stop this RunPod after 2 hours? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        print("Automatic pod stop not scheduled.")
+        return
+
+    pod_id = os.environ.get("RUNPOD_POD_ID", "").strip()
+    if not pod_id:
+        print("ERROR: RUNPOD_POD_ID is not set, so the automatic stop cannot be scheduled.", file=sys.stderr)
+        sys.exit(1)
+    if not shutil.which("runpodctl"):
+        print("ERROR: runpodctl is not installed, so the automatic stop cannot be scheduled.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        check = subprocess.run(
+            ["runpodctl", "pod", "get", pod_id],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        print("ERROR: runpodctl timed out while checking access to this pod.", file=sys.stderr)
+        sys.exit(1)
+    if check.returncode != 0:
+        print("ERROR: runpodctl could not access this pod. Check its API-key configuration.", file=sys.stderr)
+        sys.exit(1)
+
+    subprocess.Popen(
+        ["bash", "-c", 'sleep 2h; exec runpodctl pod stop "$1"', "auto-stop", pod_id],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print(f"Automatic stop scheduled for pod {pod_id} in 2 hours.")
 
 
 def snapshot():
@@ -187,6 +225,7 @@ def launch_comfyui():
 def main():
     global HF_TOKEN
     HF_TOKEN = get_and_validate_hf_token()
+    offer_pod_auto_stop()
 
     if len(sys.argv) > 1 and re.fullmatch(r"\d+", sys.argv[1]):
         concurrency = int(sys.argv[1])  # optional 1st arg overrides the prompt, e.g. `python3 setup.py 3`

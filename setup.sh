@@ -29,6 +29,30 @@ if [ -z "$HF_NAME" ]; then
 fi
 echo "Hugging Face token verified for $HF_NAME."
 
+read -r -p "Automatically stop this RunPod after 2 hours? [y/N]: " AUTO_STOP
+case "$AUTO_STOP" in
+    y|Y|yes|YES|Yes)
+        if [ -z "${RUNPOD_POD_ID:-}" ]; then
+            echo "ERROR: RUNPOD_POD_ID is not set, so the automatic stop cannot be scheduled." >&2
+            exit 1
+        fi
+        if ! command -v runpodctl >/dev/null 2>&1; then
+            echo "ERROR: runpodctl is not installed, so the automatic stop cannot be scheduled." >&2
+            exit 1
+        fi
+        if ! timeout 20 runpodctl pod get "$RUNPOD_POD_ID" >/dev/null 2>&1; then
+            echo "ERROR: runpodctl could not access this pod. Check its API-key configuration." >&2
+            exit 1
+        fi
+        nohup bash -c 'sleep 2h; exec runpodctl pod stop "$1"' auto-stop "$RUNPOD_POD_ID" \
+            >/tmp/comfy-runpod-auto-stop.log 2>&1 &
+        echo "Automatic stop scheduled for pod $RUNPOD_POD_ID in 2 hours."
+        ;;
+    *)
+        echo "Automatic pod stop not scheduled."
+        ;;
+esac
+
 cd /workspace/runpod-slim/ComfyUI
 
 echo "===== SNAPSHOT BEFORE ANYTHING RUNS ====="  # catches a stale process before touching anything else
