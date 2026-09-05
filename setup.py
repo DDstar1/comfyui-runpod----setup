@@ -4,6 +4,8 @@ Usage: python3 setup.py [concurrency]   (concurrency defaults to 2)
 """
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import getpass
@@ -269,12 +271,40 @@ def snapshot():
 
 
 def kill_stale():
-    subprocess.run(["fuser", "-k", "8188/tcp"], stderr=subprocess.DEVNULL)
-    subprocess.run(["pkill", "-9", "-f", "main.py --listen"], stderr=subprocess.DEVNULL)
-    import time
+    fuser = shutil.which("fuser")
+    ss = shutil.which("ss")
+    pkill = shutil.which("pkill")
+
+    if fuser:
+        subprocess.run([fuser, "-k", "8188/tcp"], stderr=subprocess.DEVNULL)
+    elif ss:
+        listeners = subprocess.run([ss, "-ltnp"], capture_output=True, text=True).stdout
+        for line in listeners.splitlines():
+            if ":8188" not in line:
+                continue
+            for pid in set(re.findall(r"pid=(\d+)", line)):
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+    if pkill:
+        subprocess.run([pkill, "-9", "-f", "main.py --listen"], stderr=subprocess.DEVNULL)
+    else:
+        ps = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True).stdout
+        for line in ps.splitlines():
+            if "main.py --listen" not in line:
+                continue
+            fields = line.strip().split(maxsplit=1)
+            if fields and fields[0].isdigit():
+                try:
+                    os.kill(int(fields[0]), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
     time.sleep(2)
-    ss = subprocess.run(["ss", "-ltn"], capture_output=True, text=True).stdout
-    if any(":8188 " in l for l in ss.splitlines()):
+    listeners = subprocess.run([ss, "-ltn"], capture_output=True, text=True).stdout if ss else ""
+    if any(":8188 " in line for line in listeners.splitlines()):
         print("WARNING: something is still listening on 8188 - check 'ps aux | grep main.py' and kill it manually")
 
 
