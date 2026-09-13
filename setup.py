@@ -84,6 +84,7 @@ DOWNLOADS = [  # (url, destination subfolder)
     ("https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "diffusion_models"),  # gated - accept access once, see note below
     ("https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors", "vae"),  # gated - same as above
     ("https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors", "loras"),
+    ("https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_bf16.safetensors", "loras"),
 ]
 
 GATED_REPOS_NOTE = (

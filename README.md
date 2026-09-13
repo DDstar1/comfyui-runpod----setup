@@ -62,6 +62,7 @@ cd /workspace/runpod-slim/ComfyUI
 | `flux-2-klein-base-9b-fp8.safetensors` \* | `models/diffusion_models/` |
 | `full_encoder_small_decoder.safetensors` \* | `models/vae/` |
 | `minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` | `models/loras/` |
+| `minimax_h3_ref2v_turbo_8step_v1.0_768p_bf16.safetensors` | `models/loras/` |
 
 \* Gated repos — see below.
 
@@ -88,4 +89,9 @@ If `torch.version.cuda` is higher than what `nvidia-smi` reports the driver supp
 
 ## Turbo LoRA
 
-`minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` (from `lightx2v/Minimax-h3-Turbo`) is downloaded automatically. It's a 4-step model — when using it in a workflow, drop the sampler's `steps` to match (4, not the default 20).
+Both Ref2VA Turbo LoRAs from `lightx2v/Minimax-h3-Turbo` are downloaded automatically.
+
+- `minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` is the existing fast-draft path. Use 4 steps.
+- `minimax_h3_ref2v_turbo_8step_v1.0_768p_bf16.safetensors` is the higher-quality Ref2VA path. Use 8 steps and select this exact filename in the workflow.
+
+Use the Ref2VA LoRAs for workflows driven by uploaded reference images. Do not substitute an FL2VA eight-step LoRA for this workflow family.

@@ -156,6 +156,7 @@ DL_URLS=(
     "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors|$BASE/diffusion_models"
     "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors|$BASE/vae"
     "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors|$BASE/loras"
+    "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_bf16.safetensors|$BASE/loras"
 )  # 5/6) model + lora downloads - sliding-window pool keeps exactly $DL_CONCURRENCY running at all times
 
 DL_FAILED=0
