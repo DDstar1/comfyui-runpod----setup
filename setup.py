@@ -37,13 +37,6 @@ def stage(name: str):
 
 
 def ensure_tmux():
-    """
-    Make tmux the first real setup operation.
-
-    The outer process creates the persistent session and immediately attaches
-    to it. The inner process sees TMUX and continues normally. If the session
-    already exists, attach to it rather than creating a second setup process.
-    """
     if os.environ.get("TMUX"):
         return
 
@@ -72,17 +65,17 @@ def ensure_tmux():
 
 WGET_RETRY = [
     "--tries=20", "--waitretry=45", "--random-wait",
-    "--retry-on-http-error=429,500,502,503,504",  # --tries alone does NOT retry HTTP 4xx by default
+    "--retry-on-http-error=429,500,502,503,504",
 ]
 
-DOWNLOADS = [  # (url, destination subfolder)
+DOWNLOADS = [
     ("https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", "diffusion_models"),
     ("https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "text_encoders"),
     ("https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "text_encoders"),
     ("https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors", "vae"),
-    ("https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors", "vae"),
-    ("https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "diffusion_models"),  # gated - accept access once, see note below
-    ("https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors", "vae"),  # gated - same as above
+    ("https://huggingface.co/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors", "vae"),
+    ("https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "diffusion_models"),
+    ("https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors", "vae"),
     ("https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors", "loras"),
     ("https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_bf16.safetensors", "loras"),
 ]
@@ -104,7 +97,6 @@ def run(cmd, **kwargs):
 
 
 def masked_input(prompt: str) -> str:
-    """Read a secret from a Unix terminal while showing one dot per character."""
     if not sys.stdin.isatty():
         return getpass.getpass(prompt)
 
@@ -391,12 +383,13 @@ def install_deps():
         "comfyui-manager",
     ], check=True)
 
-    stage("Installing SageAttention")
+    stage("Installing flash-attn (FlashAttention)")
     run([
         str(VENV_PIP),
         "install",
-        "sageattention",
-    ], check=True)  # required for --use-sage-attention
+        "flash-attn",
+        "--no-build-isolation",
+    ], check=True)
 
 
 def install_custom_nodes():
@@ -408,7 +401,6 @@ def install_custom_nodes():
     req = extender_dir / "requirements.txt"
     if req.is_file():
         run([str(VENV_PIP), "install", "-r", str(req), "-q"], check=True)
-    # TODO: confirm repo URLs for "Spectrum" and "Prompt Builder" custom nodes, add clone calls here
 
 
 def download_one(url: str, dest_subdir: str) -> bool:
@@ -428,7 +420,7 @@ def download_one(url: str, dest_subdir: str) -> bool:
 def download_models(concurrency: int) -> bool:
     BASE.mkdir(parents=True, exist_ok=True)
     failed = False
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:  # sliding-window pool keeps exactly `concurrency` running
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = {pool.submit(download_one, url, sub): url for url, sub in DOWNLOADS}
         for future in as_completed(futures):
             if not future.result():
@@ -446,13 +438,11 @@ def launch_comfyui():
     os.execv(str(VENV_PY), [
         str(VENV_PY), "main.py",
         "--listen", "0.0.0.0", "--port", "8188",
-        "--enable-cors-header", "--enable-manager", "--use-sage-attention",
+        "--enable-cors-header", "--enable-manager", "--use-flash-attention",
     ])
 
 
 def main():
-    # IMPORTANT: this must happen before all normal setup work.
-    # Worker modes must bypass tmux because they are deliberately detached.
     if len(sys.argv) == 3 and sys.argv[1] == "--auto-stop-worker":
         sys.exit(auto_stop_worker(sys.argv[2]))
     if len(sys.argv) == 3 and sys.argv[1] == "--auto-stop-worker-check":
